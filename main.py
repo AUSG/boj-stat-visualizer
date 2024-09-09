@@ -1,3 +1,4 @@
+from typing import Dict, List, Set, Tuple, Type
 import requests
 from lxml import etree
 import datetime
@@ -16,10 +17,13 @@ import sys
 
 USER_IDS = ["roeniss"]
 
-# use ethiopia timezone because we consider 06:00(+09:00) as start of the next day
+# use ethiopia timezone because we consider 06:00(+09:00) as start of the new day
 TIMEZONE = pytz.timezone("Africa/Addis_Ababa")
 
-START_DATE_FROM_TODAY = 7  # not including today, for our purpose.s
+START_DATE_FROM_TODAY = 7  # not including today, for our purpose.
+
+MAX_FETCH_PAGE = 5
+MAX_FETCH_SIZE = 200
 
 
 #############################################
@@ -67,13 +71,14 @@ LEVEL_REFERENCE = {
 
 
 @lru_cache(maxsize=None)
-def _get_session():
+def _get_session() -> requests.Session:
     return requests.Session()
 
 
-def _get_page(user_id, top):
+def _get_page(user_id: str, top: int) -> str:
     """
-    return: str
+    Returns:
+        html
     """
     url = f"https://www.acmicpc.net/status?user_id={user_id}&result_id=4"
     if top:
@@ -90,10 +95,13 @@ def _get_page(user_id, top):
     return response.text
 
 
-def _parse_time_to_problem_id(html):
+def _parse_time_to_problem_id(html: str) -> Tuple[Dict[int, int], int]:
     """
-    return: last_submit_time to problem_id and last_submit_id
-            [dict]{[int]last_submit_time: [int]problem_id, ...}, [int]last_submit_id
+    Last accepted submission id is the problem's submit time.
+    Last submit id is also returned for cursor-based pagination
+
+    Returns:
+        submit_time to problem_id, last_submit_id
     """
     time_to_problem_id = defaultdict(lambda: 0)
 
@@ -118,10 +126,12 @@ def _parse_time_to_problem_id(html):
     return time_to_problem_id, last_submit_id
 
 
-def _merge_dicts(dict1, dict2):
+def _merge_dicts(dict1: Dict[any, int], dict2: Dict[any, int]) -> None:
     """
-    in-place merge
-    XXX: expects single value
+    in-place merge (to dict1).
+
+    Warning:
+        value is expected to be int
     """
     for key, value in dict2.items():
         if key in dict1:
@@ -130,19 +140,17 @@ def _merge_dicts(dict1, dict2):
             dict1[key] = value
 
 
-def get_time_to_problem_id(user_id):
+def get_time_to_problem_id(user_id: int) -> Dict[int, int]:
     """
-    return: last_submit_time to problem_id
-            [dict]{[int]last_submit_time: [int]problem_id, ...}x
+    Returns:
+        last_submit_time to problem_id
     """
     time_to_problem_id = {}
-    max_fetch = 5
-    max_size = 200
     last_submit_id = ""
 
-    # with above config, it roughly fetches 80 problems
-    while max_fetch > 0 and len(time_to_problem_id) < max_size:
-        max_fetch -= 1
+    left_page = MAX_FETCH_PAGE
+    while left_page > 0 and len(time_to_problem_id) < MAX_FETCH_SIZE:
+        left_page -= 1
         html = _get_page(user_id, last_submit_id)
         data, last_submit_id = _parse_time_to_problem_id(html)
         _merge_dicts(time_to_problem_id, data)
@@ -156,7 +164,7 @@ def get_time_to_problem_id(user_id):
 
 
 @lru_cache(maxsize=None)
-def _get_problem_level_dict():
+def _get_problem_level_dict() -> Dict[int, int]:
     problem_level_dict = {}
 
     with open("./problem_level_mapping.csv", "r") as f:
@@ -172,11 +180,10 @@ def _get_problem_level_dict():
     return problem_level_dict
 
 
-def _get_problem_levels(problem_ids):
+def _get_problem_levels(problem_ids: Set[int]) -> List[Type[Text]]:
     """
-    param problem_ids: [set]{[int]problem_id1, problem_id2, ...}
-    return: rich.Text list
-            [list][text1, text2, ...]
+    Returns:
+        problems' level formatted with rich.Text
     """
     if not problem_ids:
         return []
@@ -188,15 +195,17 @@ def _get_problem_levels(problem_ids):
     return [LEVEL_REFERENCE[i] for i in levels]
 
 
-def _parse_date(date_str):
-    return datetime.datetime.fromtimestamp(date_str, tz=TIMEZONE).date()
+def _parse_date(date: str) -> datetime.date:
+    return datetime.datetime.fromtimestamp(date, tz=TIMEZONE).date()
 
 
-def _get_today():
+def _get_today() -> datetime.date:
     return datetime.datetime.now(tz=TIMEZONE).date()
 
 
-def _group_problem_ids_per_day(time_to_problem_id):
+def _group_problem_ids_per_day(
+    time_to_problem_id: Dict[int, int]
+) -> Dict[datetime.date, Set]:
     date_to_problem_ids = defaultdict(set)
 
     for submit_time, problem_id in time_to_problem_id.items():
@@ -206,7 +215,7 @@ def _group_problem_ids_per_day(time_to_problem_id):
     return date_to_problem_ids
 
 
-def view_table(user_statistics_list):
+def view_table(user_statistics_list: Dict[str, Dict[int, int]]) -> None:
     today = _get_today()
     days = [
         today - datetime.timedelta(days=i) for i in range(1, START_DATE_FROM_TODAY + 1)
@@ -243,7 +252,7 @@ def view_table(user_statistics_list):
 #############################################
 
 
-def _get_user_ids():
+def _get_user_ids() -> List[str]:
     if len(sys.argv) > 1:
         return sys.argv[1:]
     return USER_IDS
